@@ -6,6 +6,7 @@ from services.chat_service import (
     create_user,
     run_ai_analysis
 )
+from services.ai_service import analyze_conversation
 from extensions import socketio
 
 chat_bp = Blueprint("chat", __name__)
@@ -28,6 +29,37 @@ def add_user():
 @chat_bp.route("/messages/<int:user_id>", methods=["GET"])
 def messages(user_id):
     return jsonify(get_messages(user_id))
+
+
+# ORIGINAL AI ANALYSIS FLOW
+@chat_bp.route("/chat", methods=["POST"])
+def analyze_chat():
+    try:
+        data = request.json or {}
+
+        conversation = data.get("conversation", [])
+        features = data.get("features", [])
+
+        if not conversation:
+            return jsonify({
+                "insights": None
+            })
+
+        insights = analyze_conversation(
+            conversation,
+            features
+        )
+
+        return jsonify({
+            "insights": insights
+        })
+
+    except Exception as e:
+        print("Chat analysis error:", str(e))
+
+        return jsonify({
+            "insights": None
+        }), 500
 
 
 def background_ai_analysis(user_id, features):
@@ -62,7 +94,7 @@ def send():
         text
     )
 
-    # INSTANT MESSAGE EMIT
+    # INSTANT UI UPDATE
     socketio.emit("new_message", {
         "user_id": user_id,
         "message": {

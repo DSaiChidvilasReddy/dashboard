@@ -58,6 +58,7 @@ function App() {
     return DEFAULT_FEATURES;
   });
 
+  const aiDebounceRef = useRef(null);
   const translationDebounceRef = useRef(null);
   const latestTranslationRequestRef = useRef(0);
 
@@ -136,11 +137,9 @@ function App() {
     loadMessages();
   }, [selectedUser]);
 
-  // SOCKET LISTENERS
+  // SOCKETS
   useEffect(() => {
     const newMessageHandler = (data) => {
-      if (!selectedUser) return;
-
       setUsers(prev =>
         prev.map(u =>
           u.id === data.user_id
@@ -151,6 +150,8 @@ function App() {
             : u
         )
       );
+
+      if (!selectedUser) return;
 
       if (data.user_id !== selectedUser.id) return;
 
@@ -168,18 +169,18 @@ function App() {
     };
 
     const insightsHandler = (data) => {
-      if (!selectedUser) return;
-
       setUsers(prev =>
         prev.map(u =>
           u.id === data.user_id
             ? {
                 ...u,
-                emotion: data.insights.emotion
+                emotion: data.insights?.emotion || u.emotion
               }
             : u
         )
       );
+
+      if (!selectedUser) return;
 
       if (data.user_id !== selectedUser.id) return;
 
@@ -195,6 +196,63 @@ function App() {
     };
 
   }, [selectedUser]);
+
+  // ORIGINAL AI ANALYSIS
+  useEffect(() => {
+    if (!selectedUser || messages.length === 0) return;
+
+    if (aiDebounceRef.current) {
+      clearTimeout(aiDebounceRef.current);
+    }
+
+    aiDebounceRef.current = setTimeout(async () => {
+      try {
+        const res = await fetch(
+          'http://127.0.0.1:5000/chat',
+          {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+              user_id: selectedUser.id,
+              conversation: messages,
+              features
+            })
+          }
+        );
+
+        const data = await res.json();
+
+        if (data.insights) {
+          setAiInsights(data.insights);
+
+          if (data.insights?.emotion) {
+            setUsers(prev =>
+              prev.map(u =>
+                u.id === selectedUser.id
+                  ? {
+                      ...u,
+                      emotion: data.insights.emotion
+                    }
+                  : u
+              )
+            );
+          }
+        }
+
+      } catch (err) {
+        console.error("AI error:", err);
+      }
+    }, 500);
+
+    return () => {
+      if (aiDebounceRef.current) {
+        clearTimeout(aiDebounceRef.current);
+      }
+    };
+
+  }, [messages, selectedUser, features]);
 
   // TRANSLATION
   useEffect(() => {
@@ -353,8 +411,7 @@ function App() {
       </div>
 
       <div className="main-container">
-        {activeTab === 'case1' &&
-          selectedUser && (
+        {activeTab === 'case1' && selectedUser && (
           <>
             <ConversationList
               users={users}
