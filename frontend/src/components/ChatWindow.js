@@ -1,4 +1,6 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, {useState, useRef, useEffect, useMemo} from 'react';
+
+import { sendMessage } from '../api';
 
 const ChatWindow = ({
   user,
@@ -7,7 +9,12 @@ const ChatWindow = ({
   aiInsights,
   features
 }) => {
-  const [newMessage, setNewMessage] = useState('');
+  const [newMessage, setNewMessage] =
+    useState('');
+
+  const [isSending, setIsSending] =
+    useState(false);
+
   const messagesEndRef = useRef(null);
 
   // AUTO SCROLL
@@ -17,35 +24,22 @@ const ChatWindow = ({
     });
   }, [messages, translatedMessages]);
 
-  // SEND MESSAGE
-  const handleSendMessage = async () => {
-    if (!newMessage.trim() || !user) return;
+  // FEATURE FLAGS
+  const featureMap = useMemo(() => {
+    const map = {};
 
-    try {
-      await fetch('http://127.0.0.1:5000/send', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          user_id: user.id,
-          sender: 'agent',
-          text: newMessage
-        })
-      });
+    features?.forEach(f => {
+      map[f.name] = f.enabled;
+    });
 
-      setNewMessage('');
+    return map;
+  }, [features]);
 
-    } catch (err) {
-      console.error("Send message error:", err);
-    }
-  };
-
-  // SENTIMENT FEATURE
   const isSentimentEnabled =
-    features?.find(
-      f => f.name === 'Sentiment Detection'
-    )?.enabled;
+    featureMap['Sentiment Detection'];
+
+  const isTranslationEnabled =
+    featureMap['Translation'];
 
   const currentEmotion =
     isSentimentEnabled
@@ -61,20 +55,45 @@ const ChatWindow = ({
   const showPositive =
     currentEmotion === 'positive';
 
-  // TRANSLATION FEATURE
-  const translationFeature =
-    features?.find(
-      f => f.name === 'Translation'
-    );
-
-  const isTranslationEnabled =
-    translationFeature?.enabled;
-
   const displayMessages =
     isTranslationEnabled &&
     translatedMessages?.length > 0
       ? translatedMessages
       : messages;
+
+  // SEND MESSAGE
+  const handleSendMessage = async () => {
+    if (
+      !newMessage.trim() ||
+      !user ||
+      isSending
+    ) {
+      return;
+    }
+
+    const text = newMessage.trim();
+
+    setIsSending(true);
+
+    try {
+      await sendMessage({
+        user_id: user.id,
+        sender: 'agent',
+        text
+      });
+
+      setNewMessage('');
+
+    } catch (err) {
+      console.error(
+        "Send message error:",
+        err
+      );
+
+    } finally {
+      setIsSending(false);
+    }
+  };
 
   return (
     <div
@@ -84,7 +103,6 @@ const ChatWindow = ({
         minWidth: '360px'
       }}
     >
-
       {/* EMOTION BANNER */}
       {isSentimentEnabled ? (
         <>
@@ -118,7 +136,7 @@ const ChatWindow = ({
         </div>
       )}
 
-      {/* CHAT MESSAGES */}
+      {/* CHAT */}
       <div className="message-container">
         {displayMessages.map(msg => (
           <div
@@ -139,30 +157,30 @@ const ChatWindow = ({
       {/* HELP PANEL */}
       {isSentimentEnabled &&
         showFrustration && (
-        <div className="help-panel">
-          <div className="help-title">
-            How can we help?
+          <div className="help-panel">
+            <div className="help-title">
+              How can we help?
+            </div>
+
+            <div className="quick-actions">
+              <button className="action-button">
+                Track Order
+              </button>
+
+              <button className="action-button">
+                Talk to Supervisor
+              </button>
+
+              <button className="action-button">
+                Raise Ticket
+              </button>
+
+              <button className="action-button">
+                Get Refund
+              </button>
+            </div>
           </div>
-
-          <div className="quick-actions">
-            <button className="action-button">
-              Track Order
-            </button>
-
-            <button className="action-button">
-              Talk to Supervisor
-            </button>
-
-            <button className="action-button">
-              Raise Ticket
-            </button>
-
-            <button className="action-button">
-              Get Refund
-            </button>
-          </div>
-        </div>
-      )}
+        )}
 
       {/* INPUT */}
       <div className="input-area">
@@ -170,6 +188,7 @@ const ChatWindow = ({
           className="input-field"
           placeholder="Reply to customer..."
           value={newMessage}
+          disabled={isSending}
           onChange={(e) =>
             setNewMessage(e.target.value)
           }
@@ -187,8 +206,14 @@ const ChatWindow = ({
         <button
           className="send-button"
           onClick={handleSendMessage}
+          disabled={
+            isSending ||
+            !newMessage.trim()
+          }
         >
-          Send
+          {isSending
+            ? 'Sending...'
+            : 'Send'}
         </button>
       </div>
     </div>

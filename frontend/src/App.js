@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import './styles.css';
 
 import ConversationList from './components/ConversationList.js';
@@ -58,19 +58,17 @@ function App() {
     return DEFAULT_FEATURES;
   });
 
+  const aiDebounceRef = useRef(null);
+  const translationDebounceRef = useRef(null);
+  const latestTranslationRequestRef = useRef(0);
+
   // SAVE UI STATE
   useEffect(() => {
-    localStorage.setItem(
-      STORAGE_KEYS.ACTIVE_TAB,
-      activeTab
-    );
+    localStorage.setItem(STORAGE_KEYS.ACTIVE_TAB, activeTab);
   }, [activeTab]);
 
   useEffect(() => {
-    localStorage.setItem(
-      STORAGE_KEYS.VIEW_MODE,
-      viewMode
-    );
+    localStorage.setItem(STORAGE_KEYS.VIEW_MODE, viewMode);
   }, [viewMode]);
 
   useEffect(() => {
@@ -139,26 +137,25 @@ function App() {
     loadMessages();
   }, [selectedUser]);
 
-  // GLOBAL SOCKET LISTENER
+  // SOCKET LISTENER
   useEffect(() => {
     const handler = (data) => {
       if (!selectedUser) return;
 
-      // update correct user's emotion
       if (data.insights?.emotion) {
         setUsers(prev =>
           prev.map(u =>
             u.id === data.user_id
               ? {
                   ...u,
-                  emotion: data.insights.emotion
+                  emotion: data.insights.emotion,
+                  lastMessage: data.message.text
                 }
               : u
           )
         );
       }
 
-      // update active chat only
       if (data.user_id !== selectedUser.id) return;
 
       const msg = data.message;
@@ -186,11 +183,15 @@ function App() {
 
   }, [selectedUser]);
 
-  // AI ANALYSIS
+  // OPTIMIZED AI ANALYSIS
   useEffect(() => {
     if (!selectedUser || messages.length === 0) return;
 
-    const runAI = async () => {
+    if (aiDebounceRef.current) {
+      clearTimeout(aiDebounceRef.current);
+    }
+
+    aiDebounceRef.current = setTimeout(async () => {
       try {
         const res = await fetch(
           'http://127.0.0.1:5000/chat',
@@ -211,7 +212,6 @@ function App() {
 
         setAiInsights(data.insights);
 
-        // sync conversation list emotion
         if (data.insights?.emotion) {
           setUsers(prev =>
             prev.map(u =>
@@ -228,24 +228,24 @@ function App() {
       } catch (err) {
         console.error("AI error:", err);
       }
-    };
+    }, 700);
 
-    runAI();
+    return () => {
+      if (aiDebounceRef.current) {
+        clearTimeout(aiDebounceRef.current);
+      }
+    };
 
   }, [messages, selectedUser, features]);
 
-  // TRANSLATION
+  // OPTIMIZED TRANSLATION
   useEffect(() => {
-    const translationFeature =
-      features.find(
-        f => f.name === "Translation"
-      );
+    const translationFeature = features.find(
+      f => f.name === "Translation"
+    );
 
-    const isEnabled =
-      translationFeature?.enabled;
-
-    const language =
-      translationFeature?.config?.language;
+    const isEnabled = translationFeature?.enabled;
+    const language = translationFeature?.config?.language;
 
     if (!isEnabled) {
       setTranslatedMessages([]);
@@ -256,38 +256,50 @@ function App() {
       return;
     }
 
-    const runTranslation = async () => {
+    if (messages.length === 0) {
+      setTranslatedMessages([]);
+      return;
+    }
+
+    if (translationDebounceRef.current) {
+      clearTimeout(translationDebounceRef.current);
+    }
+
+    translationDebounceRef.current = setTimeout(async () => {
       try {
+        const requestId = ++latestTranslationRequestRef.current;
+
         const res = await translateMessages(
           messages,
           language
         );
 
+        if (
+          requestId !==
+          latestTranslationRequestRef.current
+        ) {
+          return;
+        }
+
         setTranslatedMessages(res.messages);
 
       } catch (err) {
-        console.error(
-          "Translation error:",
-          err
-        );
+        console.error("Translation error:", err);
+      }
+    }, 500);
+
+    return () => {
+      if (translationDebounceRef.current) {
+        clearTimeout(translationDebounceRef.current);
       }
     };
 
-    if (messages.length > 0) {
-      runTranslation();
-    }
-
   }, [
     messages,
-    features.find(
-      f => f.name === "Translation"
-    )?.enabled,
-    features.find(
-      f => f.name === "Translation"
-    )?.config?.language
+    features.find(f => f.name === "Translation")?.enabled,
+    features.find(f => f.name === "Translation")?.config?.language
   ]);
 
-  // USER SWITCH
   const handleSelectUser = (user) => {
     setSelectedUser(user);
     setMessages([]);
@@ -295,7 +307,6 @@ function App() {
     setAiInsights(null);
   };
 
-  // FEATURE TOGGLE
   const handleToggleFeature = (
     featureId,
     configUpdate = null
@@ -325,7 +336,6 @@ function App() {
     );
   };
 
-  // CUSTOMER MODE
   if (viewMode === "customer") {
     return (
       <div className="app">
@@ -335,9 +345,7 @@ function App() {
           <div className="tabs">
             <button
               className="tab"
-              onClick={() =>
-                setViewMode("agent")
-              }
+              onClick={() => setViewMode("agent")}
             >
               Agent Dashboard
             </button>
@@ -361,9 +369,7 @@ function App() {
                 ? 'active'
                 : ''
             }`}
-            onClick={() =>
-              setActiveTab('case1')
-            }
+            onClick={() => setActiveTab('case1')}
           >
             Chats
           </button>
@@ -374,18 +380,14 @@ function App() {
                 ? 'active'
                 : ''
             }`}
-            onClick={() =>
-              setActiveTab('case2')
-            }
+            onClick={() => setActiveTab('case2')}
           >
             Feature Settings
           </button>
 
           <button
             className="tab"
-            onClick={() =>
-              setViewMode("customer")
-            }
+            onClick={() => setViewMode("customer")}
           >
             Customer Simulation
           </button>
@@ -393,8 +395,7 @@ function App() {
       </div>
 
       <div className="main-container">
-        {activeTab === 'case1' &&
-          selectedUser && (
+        {activeTab === 'case1' && selectedUser && (
           <>
             <ConversationList
               users={users}
@@ -416,9 +417,7 @@ function App() {
             />
 
             <EmotionShowcase
-              currentEmotion={
-                aiInsights?.emotion
-              }
+              currentEmotion={aiInsights?.emotion}
             />
           </>
         )}
@@ -427,9 +426,7 @@ function App() {
           <>
             <FeatureTogglePanel
               features={features}
-              onToggleFeature={
-                handleToggleFeature
-              }
+              onToggleFeature={handleToggleFeature}
             />
 
             <ImpactComparison

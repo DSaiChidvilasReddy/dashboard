@@ -1,23 +1,48 @@
-import React, { useEffect, useState, useRef } from 'react';
+import React, {
+  useEffect,
+  useState,
+  useRef
+} from 'react';
+
 import socket from '../socket';
+import {
+  getUsers,
+  getMessages,
+  sendMessage
+} from '../api';
 
 const CustomerChat = () => {
-  const [users, setUsers] = useState([]);
-  const [selectedUser, setSelectedUser] = useState(null);
-  const [messages, setMessages] = useState([]);
-  const [newMessage, setNewMessage] = useState('');
-  const [newCustomerName, setNewCustomerName] = useState('');
+  const [users, setUsers] =
+    useState([]);
+
+  const [selectedUser, setSelectedUser] =
+    useState(null);
+
+  const [messages, setMessages] =
+    useState([]);
+
+  const [newMessage, setNewMessage] =
+    useState('');
+
+  const [newCustomerName, setNewCustomerName] =
+    useState('');
+
+  const [isSending, setIsSending] =
+    useState(false);
+
+  const [isAddingCustomer, setIsAddingCustomer] =
+    useState(false);
 
   const messagesEndRef = useRef(null);
 
+  // LOAD USERS
   useEffect(() => {
     loadUsers();
   }, []);
 
   const loadUsers = async () => {
     try {
-      const res = await fetch("http://127.0.0.1:5000/users");
-      const data = await res.json();
+      const data = await getUsers();
 
       setUsers(data);
 
@@ -26,19 +51,38 @@ const CustomerChat = () => {
       }
 
     } catch (err) {
-      console.error(err);
+      console.error(
+        "Load users error:",
+        err
+      );
     }
   };
 
+  // LOAD CHAT
   useEffect(() => {
     if (!selectedUser) return;
 
-    fetch(`http://127.0.0.1:5000/messages/${selectedUser.id}`)
-      .then(res => res.json())
-      .then(data => setMessages(data));
+    const loadChat = async () => {
+      try {
+        const data = await getMessages(
+          selectedUser.id
+        );
+
+        setMessages(data);
+
+      } catch (err) {
+        console.error(
+          "Load chat error:",
+          err
+        );
+      }
+    };
+
+    loadChat();
 
   }, [selectedUser]);
 
+  // SOCKET
   useEffect(() => {
     const handler = (data) => {
       setUsers(prev =>
@@ -46,87 +90,145 @@ const CustomerChat = () => {
           u.id === data.user_id
             ? {
                 ...u,
-                lastMessage: data.message.text,
-                emotion: data.insights?.emotion || u.emotion
+                lastMessage:
+                  data.message.text,
+                emotion:
+                  data.insights?.emotion ||
+                  u.emotion
               }
             : u
         )
       );
 
-      if (selectedUser?.id !== data.user_id) return;
+      if (
+        selectedUser?.id !==
+        data.user_id
+      ) {
+        return;
+      }
 
       setMessages(prev => {
-        if (prev.find(m => m.id === data.message.id)) {
+        const exists = prev.some(
+          m =>
+            m.id ===
+            data.message.id
+        );
+
+        if (exists) {
           return prev;
         }
 
-        return [...prev, data.message];
+        return [
+          ...prev,
+          data.message
+        ];
       });
     };
 
     socket.on("new_message", handler);
 
-    return () => socket.off("new_message", handler);
+    return () => {
+      socket.off(
+        "new_message",
+        handler
+      );
+    };
 
   }, [selectedUser]);
 
+  // AUTO SCROLL
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({
       behavior: "smooth"
     });
   }, [messages]);
 
+  // SEND MESSAGE
   const handleSend = async () => {
-    if (!newMessage.trim() || !selectedUser) return;
+    if (
+      !newMessage.trim() ||
+      !selectedUser ||
+      isSending
+    ) {
+      return;
+    }
+
+    const text = newMessage.trim();
+
+    setIsSending(true);
 
     try {
-      await fetch("http://127.0.0.1:5000/send", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify({
-          user_id: selectedUser.id,
-          sender: "customer",
-          text: newMessage
-        })
+      await sendMessage({
+        user_id: selectedUser.id,
+        sender: "customer",
+        text
       });
 
       setNewMessage("");
 
     } catch (err) {
-      console.error(err);
+      console.error(
+        "Send message error:",
+        err
+      );
+
+    } finally {
+      setIsSending(false);
     }
   };
 
+  // ADD CUSTOMER
   const handleAddCustomer = async () => {
-    if (!newCustomerName.trim()) return;
+    if (
+      !newCustomerName.trim() ||
+      isAddingCustomer
+    ) {
+      return;
+    }
+
+    setIsAddingCustomer(true);
 
     try {
-      const res = await fetch("http://127.0.0.1:5000/users", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify({
-          name: newCustomerName
-        })
-      });
+      const res = await fetch(
+        "http://127.0.0.1:5000/users",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type":
+              "application/json"
+          },
+          body: JSON.stringify({
+            name: newCustomerName.trim()
+          })
+        }
+      );
 
-      const newUser = await res.json();
+      const newUser =
+        await res.json();
 
-      setUsers(prev => [...prev, newUser]);
+      setUsers(prev => [
+        ...prev,
+        newUser
+      ]);
+
       setSelectedUser(newUser);
+
       setNewCustomerName("");
 
     } catch (err) {
-      console.error(err);
+      console.error(
+        "Add customer error:",
+        err
+      );
+
+    } finally {
+      setIsAddingCustomer(false);
     }
   };
 
   return (
     <div className="customer-dashboard">
-
+      {/* LEFT */}
       <div className="panel customer-sidebar">
         <div className="customer-sidebar-header">
           Customers
@@ -137,16 +239,33 @@ const CustomerChat = () => {
             type="text"
             placeholder="Enter customer name..."
             value={newCustomerName}
-            onChange={(e) => setNewCustomerName(e.target.value)}
+            disabled={isAddingCustomer}
+            onChange={(e) =>
+              setNewCustomerName(
+                e.target.value
+              )
+            }
             onKeyDown={(e) => {
-              if (e.key === "Enter") {
+              if (
+                e.key === "Enter"
+              ) {
                 handleAddCustomer();
               }
             }}
           />
 
-          <button onClick={handleAddCustomer}>
-            Add
+          <button
+            onClick={
+              handleAddCustomer
+            }
+            disabled={
+              isAddingCustomer ||
+              !newCustomerName.trim()
+            }
+          >
+            {isAddingCustomer
+              ? "Adding..."
+              : "Add"}
           </button>
         </div>
 
@@ -155,9 +274,16 @@ const CustomerChat = () => {
             <div
               key={user.id}
               className={`customer-list-item ${
-                selectedUser?.id === user.id ? 'active' : ''
+                selectedUser?.id ===
+                user.id
+                  ? 'active'
+                  : ''
               }`}
-              onClick={() => setSelectedUser(user)}
+              onClick={() =>
+                setSelectedUser(
+                  user
+                )
+              }
             >
               <div className="customer-avatar">
                 👤
@@ -169,7 +295,8 @@ const CustomerChat = () => {
                 </div>
 
                 <div className="customer-preview">
-                  {user.lastMessage || "No messages yet"}
+                  {user.lastMessage ||
+                    "No messages yet"}
                 </div>
               </div>
             </div>
@@ -177,6 +304,7 @@ const CustomerChat = () => {
         </div>
       </div>
 
+      {/* RIGHT */}
       <div className="panel customer-chat-panel">
         <div className="customer-message-container">
           {messages.map(msg => (
@@ -200,9 +328,17 @@ const CustomerChat = () => {
             className="customer-input"
             placeholder="Type your message..."
             value={newMessage}
-            onChange={(e) => setNewMessage(e.target.value)}
+            disabled={isSending}
+            onChange={(e) =>
+              setNewMessage(
+                e.target.value
+              )
+            }
             onKeyDown={(e) => {
-              if (e.key === "Enter" && !e.shiftKey) {
+              if (
+                e.key === "Enter" &&
+                !e.shiftKey
+              ) {
                 e.preventDefault();
                 handleSend();
               }
@@ -212,12 +348,17 @@ const CustomerChat = () => {
           <button
             className="customer-send-btn"
             onClick={handleSend}
+            disabled={
+              isSending ||
+              !newMessage.trim()
+            }
           >
-            Send
+            {isSending
+              ? "Sending..."
+              : "Send"}
           </button>
         </div>
       </div>
-
     </div>
   );
 };
