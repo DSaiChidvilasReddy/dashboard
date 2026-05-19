@@ -106,6 +106,7 @@ def get_messages(user_id):
         db.close()
 
 
+# FAST MESSAGE SAVE
 def add_message(user_id, sender, text):
     db = SessionLocal()
 
@@ -121,6 +122,21 @@ def add_message(user_id, sender, text):
         db.commit()
         db.refresh(new_msg)
 
+        return {
+            "status": "message saved",
+            "id": new_msg.id,
+            "timestamp": new_msg.timestamp
+        }
+
+    finally:
+        db.close()
+
+
+# BACKGROUND AI
+def run_ai_analysis(user_id, features=None):
+    db = SessionLocal()
+
+    try:
         messages = db.query(Message)\
             .filter(Message.user_id == user_id)\
             .order_by(Message.id.asc())\
@@ -134,7 +150,10 @@ def add_message(user_id, sender, text):
             for m in messages
         ]
 
-        ai_result = analyze_conversation(conversation)
+        ai_result = analyze_conversation(
+            conversation,
+            features
+        )
 
         user = db.query(User)\
             .filter(User.id == user_id)\
@@ -142,15 +161,9 @@ def add_message(user_id, sender, text):
 
         if user:
             user.emotion = ai_result["emotion"]
+            db.commit()
 
-        db.commit()
-
-        return {
-            "status": "message saved",
-            "id": new_msg.id,
-            "timestamp": new_msg.timestamp,
-            "insights": ai_result
-        }
+        return ai_result
 
     finally:
         db.close()

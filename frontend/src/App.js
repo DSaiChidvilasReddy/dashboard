@@ -58,7 +58,6 @@ function App() {
     return DEFAULT_FEATURES;
   });
 
-  const aiDebounceRef = useRef(null);
   const translationDebounceRef = useRef(null);
   const latestTranslationRequestRef = useRef(0);
 
@@ -137,24 +136,21 @@ function App() {
     loadMessages();
   }, [selectedUser]);
 
-  // SOCKET LISTENER
+  // SOCKET LISTENERS
   useEffect(() => {
-    const handler = (data) => {
+    const newMessageHandler = (data) => {
       if (!selectedUser) return;
 
-      if (data.insights?.emotion) {
-        setUsers(prev =>
-          prev.map(u =>
-            u.id === data.user_id
-              ? {
-                  ...u,
-                  emotion: data.insights.emotion,
-                  lastMessage: data.message.text
-                }
-              : u
-          )
-        );
-      }
+      setUsers(prev =>
+        prev.map(u =>
+          u.id === data.user_id
+            ? {
+                ...u,
+                lastMessage: data.message.text
+              }
+            : u
+        )
+      );
 
       if (data.user_id !== selectedUser.id) return;
 
@@ -169,76 +165,38 @@ function App() {
 
         return [...prev, msg];
       });
-
-      if (data.insights) {
-        setAiInsights(data.insights);
-      }
     };
 
-    socket.on("new_message", handler);
+    const insightsHandler = (data) => {
+      if (!selectedUser) return;
+
+      setUsers(prev =>
+        prev.map(u =>
+          u.id === data.user_id
+            ? {
+                ...u,
+                emotion: data.insights.emotion
+              }
+            : u
+        )
+      );
+
+      if (data.user_id !== selectedUser.id) return;
+
+      setAiInsights(data.insights);
+    };
+
+    socket.on("new_message", newMessageHandler);
+    socket.on("insights_update", insightsHandler);
 
     return () => {
-      socket.off("new_message", handler);
+      socket.off("new_message", newMessageHandler);
+      socket.off("insights_update", insightsHandler);
     };
 
   }, [selectedUser]);
 
-  // OPTIMIZED AI ANALYSIS
-  useEffect(() => {
-    if (!selectedUser || messages.length === 0) return;
-
-    if (aiDebounceRef.current) {
-      clearTimeout(aiDebounceRef.current);
-    }
-
-    aiDebounceRef.current = setTimeout(async () => {
-      try {
-        const res = await fetch(
-          'http://127.0.0.1:5000/chat',
-          {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({
-              user_id: selectedUser.id,
-              conversation: messages,
-              features
-            })
-          }
-        );
-
-        const data = await res.json();
-
-        setAiInsights(data.insights);
-
-        if (data.insights?.emotion) {
-          setUsers(prev =>
-            prev.map(u =>
-              u.id === selectedUser.id
-                ? {
-                    ...u,
-                    emotion: data.insights.emotion
-                  }
-                : u
-            )
-          );
-        }
-
-      } catch (err) {
-        console.error("AI error:", err);
-      }
-    }, 700);
-
-    return () => {
-      if (aiDebounceRef.current) {
-        clearTimeout(aiDebounceRef.current);
-      }
-    };
-
-  }, [messages, selectedUser, features]);
-
-  // OPTIMIZED TRANSLATION
+  // TRANSLATION
   useEffect(() => {
     const translationFeature = features.find(
       f => f.name === "Translation"
@@ -395,7 +353,8 @@ function App() {
       </div>
 
       <div className="main-container">
-        {activeTab === 'case1' && selectedUser && (
+        {activeTab === 'case1' &&
+          selectedUser && (
           <>
             <ConversationList
               users={users}

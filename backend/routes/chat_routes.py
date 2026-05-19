@@ -3,7 +3,8 @@ from services.chat_service import (
     get_users,
     get_messages,
     add_message,
-    create_user
+    create_user,
+    run_ai_analysis
 )
 from extensions import socketio
 
@@ -29,25 +30,55 @@ def messages(user_id):
     return jsonify(get_messages(user_id))
 
 
+def background_ai_analysis(user_id, features):
+    try:
+        ai_result = run_ai_analysis(
+            user_id,
+            features
+        )
+
+        socketio.emit("insights_update", {
+            "user_id": user_id,
+            "insights": ai_result
+        })
+
+    except Exception as e:
+        print("Background AI Error:", str(e))
+
+
 @chat_bp.route("/send", methods=["POST"])
 def send():
     data = request.json
 
+    user_id = data["user_id"]
+    sender = data["sender"]
+    text = data["text"]
+    features = data.get("features", None)
+
+    # FAST SAVE
     result = add_message(
-        data["user_id"],
-        data["sender"],
-        data["text"]
+        user_id,
+        sender,
+        text
     )
 
+    # INSTANT MESSAGE EMIT
     socketio.emit("new_message", {
-        "user_id": data["user_id"],
+        "user_id": user_id,
         "message": {
             "id": result["id"],
-            "sender": data["sender"],
-            "text": data["text"],
+            "sender": sender,
+            "text": text,
             "timestamp": result["timestamp"]
         },
-        "insights": result["insights"]
+        "insights": None
     })
+
+    # BACKGROUND AI
+    socketio.start_background_task(
+        background_ai_analysis,
+        user_id,
+        features
+    )
 
     return jsonify(result)
